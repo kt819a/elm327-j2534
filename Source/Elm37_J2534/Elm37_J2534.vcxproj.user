@@ -22,7 +22,8 @@
     <RESOURCE_FILE>ptshim.rc</RESOURCE_FILE>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <LocalDebuggerCommand>Y:\Visualstudio\Flasher\bin\Debug\UpxFlasher.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommand>
+    </LocalDebuggerCommand>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>

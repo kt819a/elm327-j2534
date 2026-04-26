@@ -30,7 +30,7 @@ HANDLE bgTask;
 
 elm327Comm::elm327Comm(void)
 {
-
+    currentHeader = "752";
 }
 elm327Comm::~elm327Comm(void)
 {
@@ -144,6 +144,7 @@ PASSTHRU_MSG elm327Comm::ReceiveIsoTpMessage(int timeout)
     PASSTHRU_MSG pMsg;
     pMsg.DataSize = 0;
     uint64_t starttime = current_time_ms();
+    OutputDebugStringA((std::string("ReceiveIsoTpMessage")).c_str());
     for (;;)
     {
         Receive(1, timeout);
@@ -246,7 +247,7 @@ bool elm327Comm::elm327SendMsg(canmsg Msg, int timeout)
     SetWriteTimeout(timeout);
     PASSTHRU_MSG message;
     UintToArray(Msg.MsgId, message.Data);
-    memcpy(message.Data + 4, Msg.data, 8);
+    memcpy(message.Data + 4, Msg.data, Msg.size);
     return SendPassthruMessage(&message, 1);
 }
 
@@ -291,14 +292,14 @@ isNullOrWhiteSpace(std::string const& str)
 }
 inline void ltrim(std::string& s) {
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
-        return !std::isspace(ch);
+        return !std::isspace(ch, std::locale());
         }));
 }
 
 // trim from end (in place)
 inline void rtrim(std::string& s) {
     s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
-        return !std::isspace(ch);
+        return !std::isspace(ch, std::locale());
         }).base(), s.end());
 }
 
@@ -354,6 +355,7 @@ SerialString elm327Comm::ReadELMLine(bool MultiLine, int timeout)
         if ((current_time_ms() - starttime) > timeout)
         {
             builtString.Data = "";
+            OutputDebugStringA("TimeOut\n");
             return builtString;
         }
         // Receive a single byte.
@@ -362,6 +364,10 @@ SerialString elm327Comm::ReadELMLine(bool MultiLine, int timeout)
         {
             Sleep(1);
             continue;
+        }
+        else
+        {
+            starttime = current_time_ms();
         }
 
         // Is it the prompt '>'.
@@ -442,41 +448,42 @@ bool elm327Comm::SendAndVerify(std::string message, std::string expectedResponse
 }
 int elm327Comm::ConnectProtocol(int Protocol, int Bauds)
 {
+    if (Protocol == ISO15765_PS)
+        Protocol = ISO15765;
+
+    if (Protocol == CurrentProtocol)
+        return STATUS_NOERROR;
+
     CurrentProtocol = Protocol;
 
     OutputDebugStringA(SendRequest("AT E0", true).Data.c_str()); // disable echo
     OutputDebugStringA(SendRequest("AT S0", true).Data.c_str()); // no spaces on responses
 
-
     if (Protocol == ISO15765)
     {
         if (!SendAndVerify("AT AL", "OK") ||
+            !SendAndVerify("AT H1", "OK") ||
             !SendAndVerify("AT SP6", "OK") ||              // Set Protocol 6 (CAN)
-            !SendAndVerify("AT DP", "ISO 15765-4 (CAN 11/500)") ||    // Get Protocol (Verify 15765-4)
             !SendAndVerify("AT AR", "OK") ||               // Turn Auto Receive on (default should be on anyway)
-            !SendAndVerify("AT AT0", "OK") ||              // Disable adaptive timeouts
-            !SendAndVerify("AT SH7E0" , "OK") || // Set header
-            !SendAndVerify("AT CF5E0" , "OK") ||     //Set filter id
-            !SendAndVerify("AT CM5F0", "OK") ||     //Set filter mask
-//            !SendAndVerify("AT CF5E8", "OK") ||     //Set filter id
-//            !SendAndVerify("AT CM5FF", "OK") ||     //Set filter mask
-            !SendAndVerify("AT H1", "OK") ||               // Send headers
-            !SendAndVerify("AT CAF0", "OK") ||               // Don't format isotp messages automatically                       
-            !SendAndVerify("AT FCSM0", "OK") ||         //Automatically send flow control messages
+            !SendAndVerify("AT AT0", "OK") || 
+            !SendAndVerify("AT SP6", "OK") ||
+            !SendAndVerify("AT SH" + currentHeader, "OK") || // Set header
+            !SendAndVerify("AT CF000" , "OK") ||     //Set filter id
+            !SendAndVerify("AT CM000", "OK") ||     //Set filter 
+            !SendAndVerify("AT CAF0", "OK") ||               // Don't format isotp messages automatically
+            !SendAndVerify("AT FCSH" + currentHeader, "OK") ||         //Automatically send flow control messages
+            !SendAndVerify("AT FCSD30000A", "OK") ||         //Automatically send flow control messages
+            !SendAndVerify("AT FCSM1", "OK") ||         //Automatically send flow control messages
             !SendAndVerify("AT CFC1", "OK") ||          //Automatically send flow control messages
-            !SendAndVerify("AT ST 20", "OK"))             // Set timeout (will be adjusted later, too)                 
+            !SendAndVerify("AT ST 64", "OK"))             // Set timeout (will be adjusted later, too)                 
         {
             return ERR_FAILED;
         }
     }
     else if (Protocol == J1850VPW)
     {
-        if (!SendAndVerify("AT AL", "OK") ||               // Allow Long packets
-            !SendAndVerify("AT SP2", "OK") ||              // Set Protocol 2 (VPW)
+        if (!SendAndVerify("AT SP2", "OK") ||              // Set Protocol 2 (VPW)
             !SendAndVerify("AT DP", "SAE J1850 VPW") ||    // Get Protocol (Verify VPW)
-            !SendAndVerify("AT AR", "OK") ||               // Turn Auto Receive on (default should be on anyway)
-            !SendAndVerify("AT AT0", "OK") ||              // Disable adaptive timeouts
-            !SendAndVerify("AT H1", "OK") ||              // Send headers
             !SendAndVerify("AT ST 20", "OK")               // Set timeout (will be adjusted later, too)                 
             )
         {
@@ -498,11 +505,21 @@ int elm327Comm::Startelm327Comm()
     {
         return ERR_DEVICE_IN_USE;
     }
-    if (SendRequest("ATZ", true).Data == "")
-    {
-        return ERR_FAILED;
-    }
+    SendRequest("ATZ", true);
+    //if (SendRequest("ATZ", true).Data == "")
+    //{
+    //    return ERR_FAILED;
+    //}
+
+    //OutputDebugStringA(SendRequest("AT E0", true).Data.c_str()); // disable echo
+    //OutputDebugStringA(SendRequest("AT S0", true).Data.c_str()); // no spaces on responses
+    //OutputDebugStringA(SendRequest("AT AL", true).Data.c_str()); // Allow Long packets
+    //OutputDebugStringA(SendRequest("AT AT0", true).Data.c_str());// Turn Auto Receive on (default should be on anyway)
+    //OutputDebugStringA(SendRequest("AT AR", true).Data.c_str()); // Disable adaptive timeouts
+    //OutputDebugStringA(SendRequest("AT H1", true).Data.c_str()); // Send headers
+
     Connected = true;
+    CurrentProtocol = 0;
 
     //_beginthread(elm327Comm::static_ReceiveMessages, 0, NULL);
     return 0;
@@ -512,7 +529,7 @@ bool elm327Comm::isISO15765Frame(uint32_t canId, uint8_t databyte0, uint8_t leng
 {
     if (length < 1 || length > 8) return false;
 
-    if ((canId >= 0x7E0 && canId <= 0x7EF) || (canId >= 0x5E0 && canId <= 0x5EF))
+    if ((canId >= 0x7E0 && canId <= 0x7EF) || (canId >= 0x5E0 && canId <= 0x5EF) || true) //any adress range
     {
         uint8_t pci = databyte0 & 0xF0;
         if (databyte0 == 0)
@@ -532,6 +549,12 @@ bool elm327Comm::isISO15765Frame(uint32_t canId, uint8_t databyte0, uint8_t leng
     {
         return false;
     }
+}
+
+void DebugPrintHex(unsigned char value) {
+    char buffer[8]; // достаточно для "0xFF\0"
+    std::snprintf(buffer, sizeof(buffer), "0x%02X", value);
+    OutputDebugStringA(buffer);
 }
 
 /// <summary>
@@ -581,6 +604,18 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
         return true;
     }
     
+    if (rawResponse.Data.find("BUFFER FULL") != std::string::npos) {
+        OutputDebugStringA((std::string("BUFFER FULL")).c_str());
+    }
+
+    if (rawResponse.Data.find("OUT OF MEMORY") != std::string::npos) {
+        OutputDebugStringA((std::string("OUT OF MEMORY")).c_str());
+    }
+
+    if (rawResponse.Data.find("<RX ERROR") != std::string::npos) {
+        OutputDebugStringA((std::string("<RX ERROR")).c_str());
+    }
+
     std::string data = std::regex_replace(rawResponse.Data, std::regex("BUFFER FULL"), "");
     data = std::regex_replace(data, std::regex("OUT OF MEMORY"), "");
     data = std::regex_replace(data, std::regex("<RX ERROR"), "");
@@ -608,7 +643,7 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
             {
                 std::string hexdata = "0" + singleHexResponse;
                 deviceResponseBytes = HexToBytes(hexdata);
-                if (deviceResponseBytes.size() < 5)
+                if (deviceResponseBytes.size() < 1)
                     continue;
                 uint16_t canId = (uint16_t)((deviceResponseBytes.at(0) << 8) | deviceResponseBytes.at(1));
                 //if (singleHexResponse.rfind("5E8", 0) == 0 || singleHexResponse.rfind("7E8", 0) == 0 || deviceResponseBytes.size() > 12)
@@ -618,7 +653,7 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
                     byte pci = deviceResponseBytes.at(2);
                     if ((pci & 0xF0) == 0x10)  // First frame
                     {
-                        totalLength = deviceResponseBytes.at(3);
+                        totalLength = (((uint16_t)deviceResponseBytes.at(2) & 0x0F) << 8) + deviceResponseBytes.at(3);
                         OutputDebugStringA((std::string( "[First Frame]: ") +  hexdata + ", Total data length : " + std::to_string(totalLength) + "\n").c_str());
                         for (int i = 4; i < deviceResponseBytes.size(); i++) 
                             isotpData.push_back(deviceResponseBytes.at(i));
@@ -626,9 +661,9 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
                     }
                     else if ((pci & 0xF0) == 0x20)  // Consecutive frame
                     {
-                        OutputDebugStringA((std::string("[Next Frame]: ") + hexdata + "\n").c_str());
                         for (int i = 3; i < deviceResponseBytes.size() && isotpData.size() < totalLength; i++) 
                             isotpData.push_back(deviceResponseBytes.at(i));
+                        OutputDebugStringA((std::string("[Next Frame]: ") + hexdata + ", Current length : " + std::to_string(isotpData.size()) + "\n").c_str());
                         if (isotpData.size() < totalLength)
                         {
                             //More data coming
@@ -639,19 +674,24 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
                     {
                         OutputDebugStringA((std::string("[Single Frame]: ") + hexdata + "\n").c_str());
                         totalLength = pci & 0x0F;
-                        for (int i = 3; i < deviceResponseBytes.size() && isotpData.size() < totalLength; i++) 
+                        for (int i = 3; i < deviceResponseBytes.size() && isotpData.size() < totalLength; i++)
+                        {
                             isotpData.push_back(deviceResponseBytes.at(i));
+                            //DebugPrintHex(deviceResponseBytes.at(i));
+                        }
                     }
                     deviceResponseBytes.clear();
                     deviceResponseBytes.push_back(0);
                     deviceResponseBytes.push_back(0);
                     deviceResponseBytes.push_back((byte)(canId >> 8));
                     deviceResponseBytes.push_back((byte)canId);
-                    for (int i = 0; i < isotpData.size(); i++)
+                    for (int i = 0; i < isotpData.size(); i++) {
                         deviceResponseBytes.push_back(isotpData.at(i));
+                    }
                 }
                 else 
                 {
+                    OutputDebugStringA((std::string("RX single frame/full isotp message\n").c_str()));
                     //Single frame/full isotp message
                     deviceResponseBytes = HexToBytes("00000" + singleHexResponse);
                 }
@@ -672,6 +712,7 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
             else
                 pMsg.Timestamp = rawResponse.TimeStamps.back();
             EnqueuePassthruMsg(pMsg);
+            isotpData.clear();
             OutputDebugStringA((std::string("RX: ") + ToHex(pMsg.Data, pMsg.DataSize) + "\n").c_str());
             //response.ElmPrompt = rawResponse.Prompt;
             s++;
@@ -707,7 +748,7 @@ std::vector<std::string> elm327Comm::BuildIsoTpFrames(byte *fullMessage, int ful
         for (int i = 1 + size; i < 8; i++)
             frame[i] = PAD; // AA padding
         std::string frameStr = ToHex(frame,8);
-        frames.push_back(frameStr);
+        frames.push_back(frameStr); 
     }
     else
     {
@@ -734,7 +775,7 @@ std::vector<std::string> elm327Comm::BuildIsoTpFrames(byte *fullMessage, int ful
             //byte[] cf = new byte[chunkSize +1];
             byte cf[8];
             cf[0] = (byte)(0x20 | (frameNumber & 0x0F)); // CF | sequence number
-            memcpy(cf + 1, message, chunkSize);
+            memcpy(cf + 1, message + offset, chunkSize);
             for (int j = 1 + chunkSize; j < 8; j++)
                 cf[j] = PAD; // AA padding
             std::string cfStr = ToHex(cf, 8);
@@ -787,10 +828,13 @@ bool elm327Comm::SendPassthruMessage(PASSTHRU_MSG *message, int responses)
     if (responses < 1)
         getResponse = false;
 
+    OutputDebugStringA((std::string("SendPassthruMessage.")).c_str());
+
     Serial.Purge();
     if (header != currentHeader)
     {
-        SerialString setHeaderResponse = SendRequest("AT SH " + header, getResponse);
+        SerialString setHeaderResponse = SendRequest("AT FCSH " + header, getResponse);
+        setHeaderResponse = SendRequest("AT SH " + header, getResponse);
         OutputDebugStringA((std::string( "Set header response (1): ") + setHeaderResponse.Data + std::string( ", time: ") + std::to_string(current_time_ms())+"\n").c_str());
 
         for (int retry = 0; retry < 5; retry++)
@@ -855,8 +899,7 @@ void elm327Comm::Receive(int NumMessages, int timeout)
     {
         if (timeout > 0 || Serial.BytesAvailable() > 3)
         {
-            SerialString response = ReadELMLine(false, timeout);
-            //OutputDebugStringA((std::string("Elm line: ") + response.Data+"\n").c_str());
+            SerialString response = ReadELMLine(false, 20);
             ProcessResponse(response, "receive");
         }
         else

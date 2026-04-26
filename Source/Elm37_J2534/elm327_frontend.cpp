@@ -278,7 +278,7 @@ EXTERN_DLL_EXPORT long J2534_API PassThruDisconnect(unsigned long ChannelID)
 	retval = 0;
 	canmsg cMsg;
 	cMsg.size = (uint8_t)ChannelID;
-	elm327.elm327SendMsg(cMsg, 10);
+	//elm327.elm327SendMsg(cMsg, 10);
 
 	return retval;
 }
@@ -291,9 +291,12 @@ EXTERN_DLL_EXPORT long J2534_API PassThruReadMsgs(unsigned long ChannelID, PASST
 	unsigned long reqNumMsgs = 0;
 	int msgCount = 0;
 	long starttime = GetTickCount();
+	dtDebug(_T("%.3fs >> PTReadMsgs(Channel #%ld,  %1d message(s), %ldms timeout)\n"), GetTimeSinceInit(), ChannelID, *pNumMsgs, Timeout);
+
 	if (pNumMsgs != NULL) reqNumMsgs = *pNumMsgs;
 	if (!isOpen)
 	{
+		dtDebug(_T("ERR_DEVICE_NOT_CONNECTED\n"));
 		return ERR_DEVICE_NOT_CONNECTED;
 	}
 
@@ -310,6 +313,7 @@ EXTERN_DLL_EXPORT long J2534_API PassThruReadMsgs(unsigned long ChannelID, PASST
 			if (msgNum == 0)
 			{
 				*pNumMsgs = 0;
+				dtDebug(_T("ERR_BUFFER_EMPTY\n"));
 				return ERR_BUFFER_EMPTY;
 			}
 		}
@@ -322,6 +326,7 @@ EXTERN_DLL_EXPORT long J2534_API PassThruReadMsgs(unsigned long ChannelID, PASST
 			memcpy(pMsg[msgNum].Data, Msg.Data, Msg.DataSize);
 			msgNum++;
 			*pNumMsgs = msgNum;
+			dbug_printmsg(pMsg, _T("Msg"), pNumMsgs, true);
 		}
 		if (msgNum >= reqNumMsgs)
 		{
@@ -331,6 +336,7 @@ EXTERN_DLL_EXPORT long J2534_API PassThruReadMsgs(unsigned long ChannelID, PASST
 		{
 			if (msgNum == 1)
 			{
+				dtDebug(_T("ERR_BUFFER_EMPTY\n"));
 				retval = ERR_TIMEOUT;
 			}
 			break;
@@ -364,7 +370,7 @@ EXTERN_DLL_EXPORT long J2534_API PassThruWriteMsgs(unsigned long ChannelID, PASS
 			canmsg cMsg;
 			cMsg.MsgId = elm327.ArrayToInt(pMsg[m].Data, 0);
 			cMsg.size = pMsg[m].DataSize - 4;
-			memcpy(cMsg.data, pMsg[m].Data + 4, 8);
+			memcpy(cMsg.data, pMsg[m].Data + 4, cMsg.size);
 			elm327.elm327SendMsg(cMsg, Timeout);
 		}
 		else
@@ -641,7 +647,8 @@ EXTERN_DLL_EXPORT long J2534_API PassThruIoctl(unsigned long ChannelID, unsigned
 			retval = 0;
 			break;
 		case READ_VBATT:
-			*(int*)pOutput = elm327.ReadVoltage() * 1000;
+			//* (int*)pOutput = elm327.ReadVoltage() * 1000;
+			*(int*)pOutput = 12.8 * 1000;
 			break;
 		case FIVE_BAUD_INIT:
 			//simResult = GetIOCTLvalue("FIVE_BAUD_INIT",pInput, pOutput, &retval);

@@ -77,6 +77,8 @@ public:
 	void StartPeriodicMessages();
 
 private:
+	bool Connected;
+	typedef unsigned char byte;
 	bool cksumok(uint8_t* buf);
 	uint64_t current_time_ms();
 	void SendPeriodicMessages();
@@ -97,6 +99,5 @@ private:
 		static_cast<elm327Comm*>(args)->SendPeriodicMessages();
 		return 0;
 	}
-
 };
 
