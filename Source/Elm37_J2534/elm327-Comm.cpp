@@ -7,6 +7,7 @@
 #include "elm327_frontend.h"
 #include <regex>
 #include <algorithm>
+#include <sstream>
 
 #define PAD 0xAA
 //#define PAD 0x00
@@ -71,7 +72,7 @@ bool isHex(std::string const& str)
     return false;
 }
 
-std::string ToHex(byte * pMsg, int size)
+std::string ToHex(byte * pMsg, int size, bool space = true)
 {
     const char* hexChar = "0123456789ABCDEF";
     std::string message;
@@ -79,7 +80,8 @@ std::string ToHex(byte * pMsg, int size)
     {
         message += hexChar[(pMsg[i] >> 4) & 0x0f];
         message += hexChar[(pMsg[i]) & 0x0f];
-        message += ' ';
+        if (space)
+            message += ' ';
     }
     return message;
 }
@@ -231,12 +233,29 @@ int elm327Comm::elm327RemoveFilter(uint32_t FilterId, uint8_t bus)
 {
     return true;
 }
-
-
-uint32_t elm327Comm::elm327SetFilter(UINT32 Filter, UINT32 Flow, UINT32 Mask, uint8_t bus)
+uint32_t elm327Comm::elm327SetFilter(UINT32 Filter, UINT32 Flow, UINT32 Mask, uint8_t bus, bool isExtAddress, UINT8 extAddress)
 {
+    std::ostringstream oss;
+    oss << "elm327Comm::elm327SetFilter(Filter: 0x" << std::hex << Filter
+        << ", Flow: 0x" << Flow << ", Mask: 0x" << Mask << std::dec
+        << ", bus: " << static_cast<int>(bus) << ", isExtAddress: " << (isExtAddress ? "true" : "false")
+        << ", extAddress: 0x" << std::hex << static_cast<int>(extAddress) << std::dec << ")";
+    OutputDebugStringA(oss.str().c_str());
+
+    if ((extendedAddress == extAddress) && (isExtendedAdressing == isExtAddress))
+        return 1;
+
+    extendedAddress = extAddress;
+    isExtendedAdressing = isExtAddress;
+
+    if (isExtAddress)
+        SendRequest("AT FCSD" + ToHex(&extendedAddress,1,false) + "30000A", true);
+    else
+        SendRequest("AT FCSD30000A", true);
+
     return 1;
 }
+
 int elm327Comm::elm327RemoveFilters(uint8_t bus)
 {
     return 0;
@@ -552,7 +571,7 @@ bool elm327Comm::isISO15765Frame(uint32_t canId, uint8_t databyte0, uint8_t leng
 }
 
 void DebugPrintHex(unsigned char value) {
-    char buffer[8]; // достаточно для "0xFF\0"
+    char buffer[8]; // РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР»СЏ "0xFF\0"
     std::snprintf(buffer, sizeof(buffer), "0x%02X", value);
     OutputDebugStringA(buffer);
 }
@@ -643,7 +662,9 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
             {
                 std::string hexdata = "0" + singleHexResponse;
                 deviceResponseBytes = HexToBytes(hexdata);
-                if (deviceResponseBytes.size() < 1)
+                if (isExtendedAdressing)
+                    deviceResponseBytes.erase(deviceResponseBytes.begin() + 2);
+                if (deviceResponseBytes.size() < 3)
                     continue;
                 uint16_t canId = (uint16_t)((deviceResponseBytes.at(0) << 8) | deviceResponseBytes.at(1));
                 //if (singleHexResponse.rfind("5E8", 0) == 0 || singleHexResponse.rfind("7E8", 0) == 0 || deviceResponseBytes.size() > 12)
@@ -685,6 +706,8 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
                     deviceResponseBytes.push_back(0);
                     deviceResponseBytes.push_back((byte)(canId >> 8));
                     deviceResponseBytes.push_back((byte)canId);
+                    if (isExtendedAdressing)
+                        deviceResponseBytes.push_back(extendedAddress);
                     for (int i = 0; i < isotpData.size(); i++) {
                         deviceResponseBytes.push_back(isotpData.at(i));
                     }
@@ -736,17 +759,47 @@ bool elm327Comm::ProcessResponse(SerialString rawResponse, std::string context, 
 std::vector<std::string> elm327Comm::BuildIsoTpFrames(byte *fullMessage, int fullsize)
 {
     std::vector<std::string> frames;
-    byte *message = fullMessage + 4;
-    int size = fullsize - 4;
+    byte *message;
+    int size;
+    int maxPayloadSize;
+    int offset;
+
+    if (isExtendedAdressing)
+    {
+        message = fullMessage + 5;
+        size = fullsize - 5;
+        maxPayloadSize = 6;
+        offset = 5;
+    }
+    else
+    {
+        message = fullMessage + 4;
+        size = fullsize - 4;
+        maxPayloadSize = 7;
+        offset = 6;
+    }
+        
+
     OutputDebugStringA((std::string("IsoTP message, length: ") + std::to_string(size) + "\n").c_str());
-    if (size <= 7)
+    if (size <= maxPayloadSize)
     {
         // Single Frame
         byte frame[8];
-        frame[0] = (byte)(0x00 | size); // SF | length
-        memcpy(frame + 1, message, size);
-        for (int i = 1 + size; i < 8; i++)
-            frame[i] = PAD; // AA padding
+        if (isExtendedAdressing)
+        {
+            frame[0] = extendedAddress;
+            frame[1] = (byte)(0x00 | size); // SF | length
+            memcpy(frame + 2, message, size);
+            for (int i = 2 + size; i < 8; i++)
+                frame[i] = PAD; // AA padding
+        }
+        else
+        {
+            frame[0] = (byte)(0x00 | size); // SF | length
+            memcpy(frame + 1, message, size);
+            for (int i = 1 + size; i < 8; i++)
+                frame[i] = PAD; // AA padding
+        }
         std::string frameStr = ToHex(frame,8);
         frames.push_back(frameStr); 
     }
@@ -755,29 +808,51 @@ std::vector<std::string> elm327Comm::BuildIsoTpFrames(byte *fullMessage, int ful
         // Multi-Frame
         OutputDebugStringA("Multi-frame\n");
         int totalLength = size;
-        int numConsecutiveFrames = (totalLength - 6 + 6) / 7;
 
         // First Frame
         byte firstFrame[8];
-        firstFrame[0] = (byte)(0x10 | ((totalLength >> 8) & 0x0F)); // FF | high nibble of length
-        firstFrame[1] = (byte)(totalLength & 0xFF); // low byte of length
-        memcpy(firstFrame + 2, message, 6);
+
+        if (isExtendedAdressing)
+        {
+            firstFrame[0] = extendedAddress;
+            firstFrame[1] = (byte)(0x10 | ((totalLength >> 8) & 0x0F)); // FF | high nibble of length
+            firstFrame[2] = (byte)(totalLength & 0xFF); // low byte of length
+            memcpy(firstFrame + 3, message, 5);
+        }
+        else
+        {
+            firstFrame[0] = (byte)(0x10 | ((totalLength >> 8) & 0x0F)); // FF | high nibble of length
+            firstFrame[1] = (byte)(totalLength & 0xFF); // low byte of length
+            memcpy(firstFrame + 2, message, 6);
+        }
+        
         std::string frameStr = ToHex(firstFrame, 8);
         frames.push_back(frameStr);
 
         // Consecutive Frames
-        int offset = 6;
+
         for (int frameNumber = 1; offset < totalLength; frameNumber++)
         {
-            int chunkSize = 7;
-            if ((totalLength - offset) < 7)
+            int chunkSize = maxPayloadSize;
+            if ((totalLength - offset) < maxPayloadSize)
                 chunkSize = totalLength - offset;
-            //byte[] cf = new byte[chunkSize +1];
             byte cf[8];
-            cf[0] = (byte)(0x20 | (frameNumber & 0x0F)); // CF | sequence number
-            memcpy(cf + 1, message + offset, chunkSize);
-            for (int j = 1 + chunkSize; j < 8; j++)
-                cf[j] = PAD; // AA padding
+            if (isExtendedAdressing)
+            {
+                cf[0] = extendedAddress;
+                cf[1] = (byte)(0x20 | (frameNumber & 0x0F)); // CF | sequence number
+                memcpy(cf + 2, message + offset, chunkSize);
+                for (int j = 2 + chunkSize; j < 8; j++)
+                    cf[j] = PAD; // AA padding
+            }
+            else
+            {
+                cf[0] = (byte)(0x20 | (frameNumber & 0x0F)); // CF | sequence number
+                memcpy(cf + 1, message + offset, chunkSize);
+                for (int j = 1 + chunkSize; j < 8; j++)
+                    cf[j] = PAD; // AA padding
+            }
+
             std::string cfStr = ToHex(cf, 8);
             frames.push_back(cfStr);
             offset += chunkSize;
@@ -828,7 +903,7 @@ bool elm327Comm::SendPassthruMessage(PASSTHRU_MSG *message, int responses)
     if (responses < 1)
         getResponse = false;
 
-    OutputDebugStringA((std::string("SendPassthruMessage.")).c_str());
+    OutputDebugStringA((std::string("SendPassthruMessage. Protocol:") + std::to_string(CurrentProtocol)).c_str());
 
     Serial.Purge();
     if (header != currentHeader)

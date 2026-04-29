@@ -64,7 +64,7 @@ public:
 	int Startelm327Comm();
 	void Stopelm327Comm();
 	bool elm327SendMsg(canmsg Msg, int timeout);
-	uint32_t elm327SetFilter(UINT32 Filter, UINT32 Flow, UINT32 Mask, uint8_t bus);
+	uint32_t elm327SetFilter(UINT32 Filter, UINT32 Flow, UINT32 Mask, uint8_t bus, bool isExtAddress, UINT8 extAddress);
 	int elm327RemoveFilter(uint32_t FilterId, uint8_t bus);
 	int elm327RemoveFilters(uint8_t bus);
 	double ReadVoltage();
@@ -93,6 +93,9 @@ private:
 	void EnqueuePassthruMsg(PASSTHRU_MSG pMsg);
 	bool SetReadTimeout(int milliseconds);
 	bool SetWriteTimeout(int milliseconds);
+
+	bool isExtendedAdressing;
+	UINT8 extendedAddress;
 
 	static DWORD WINAPI static_SendPeriodcMessages(void* args)
 	{

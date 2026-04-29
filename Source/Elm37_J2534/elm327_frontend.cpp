@@ -484,16 +484,33 @@ EXTERN_DLL_EXPORT long J2534_API PassThruStartMsgFilter(unsigned long ChannelID,
 		pMaskMsg, pPatternMsg, pFlowControlMsg, pMsgID);
 //	SHIM_CHECK_DLL();
 //	SHIM_CHECK_FUNCTION(_PassThruStartMsgFilter);
-
+	
 	UINT32 filter = elm327.ArrayToInt(pPatternMsg->Data, 0);
 	UINT32 mask = elm327.ArrayToInt(pMaskMsg->Data, 0);
 	UINT32 flow = 0;
+	bool isExtendedAdressing;
+	UINT8 extendedAddress;
+
+	if (pPatternMsg->TxFlags & 0x80)
+	{
+		isExtendedAdressing = true;
+		if (pPatternMsg->DataSize > 4)
+			extendedAddress = pPatternMsg->Data[4];
+		else
+			extendedAddress = 0x00;
+	}
+	else
+	{
+		isExtendedAdressing = false;
+		extendedAddress = 0x00;
+	}
+
 	if (pFlowControlMsg != NULL)
 	{
 		flow = elm327.ArrayToInt(pFlowControlMsg->Data, 0);
 	}
-	else
-	*pMsgID = elm327.elm327SetFilter(filter,  flow, mask, ChannelID);
+	
+	*pMsgID = elm327.elm327SetFilter(filter,  flow, mask, ChannelID, isExtendedAdressing, extendedAddress);
 	dbug_printmsg(pMaskMsg, _T("Mask"), 1, true);
 	dbug_printmsg(pPatternMsg, _T("Pattern"), 1, true);
 	dbug_printmsg(pFlowControlMsg, _T("FlowControl"), 1, true);
@@ -514,7 +531,7 @@ EXTERN_DLL_EXPORT long J2534_API PassThruStopMsgFilter(unsigned long ChannelID, 
 		return ERR_DEVICE_NOT_CONNECTED;
 	}
 
-	elm327.elm327SetFilter(MsgID, 0,0, ChannelID);
+	elm327.elm327SetFilter(MsgID, 0,0, ChannelID, false, 0);
 
 	//elm327RemoveFilters();
 	shim_clearInternalError();
