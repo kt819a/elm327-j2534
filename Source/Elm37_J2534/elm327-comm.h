@@ -72,7 +72,7 @@ public:
 	int ArrayToInt(uint8_t* buf, int offset);
 	int ConnectProtocol(int Protocol, int Bauds);
 	PASSTHRU_MSG ReceiveIsoTpMessage(int timeout);
-	bool SendPassthruMessage(PASSTHRU_MSG* message, int responses);
+	bool SendIsoTpMessage(PASSTHRU_MSG* message, int responses);
 	int ClearBuffer();
 	void StartPeriodicMessages();
 
@@ -81,6 +81,7 @@ private:
 	typedef unsigned char byte;
 	bool cksumok(uint8_t* buf);
 	uint64_t current_time_ms();
+	void ResetPeriodicMessageTimers();
 	void SendPeriodicMessages();
 	bool isISO15765Frame(uint32_t canId, uint8_t databyte0, uint8_t length);
 	SerialString SendRequest(std::string request, bool getresponse);
@@ -93,11 +94,13 @@ private:
 	void EnqueuePassthruMsg(PASSTHRU_MSG pMsg);
 	bool SetReadTimeout(int milliseconds);
 	bool SetWriteTimeout(int milliseconds);
+	bool SendPassthruMessage(PASSTHRU_MSG* message, int responses);
+	bool elm327SendPeriodicMsg(canmsg Msg, int timeout);
 
 	bool isExtendedAdressing;
 	UINT8 extendedAddress;
 
-	static DWORD WINAPI static_SendPeriodcMessages(void* args)
+	static DWORD WINAPI static_SendPeriodicMessages(void* args)
 	{
 		static_cast<elm327Comm*>(args)->SendPeriodicMessages();
 		return 0;

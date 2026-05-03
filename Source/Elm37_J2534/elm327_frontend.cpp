@@ -42,6 +42,7 @@
 #define _POSIX_C_SOURCE 199309L
 #include <time.h>
 #include "isotphandler.h"
+#include <mutex>
 
 const char* hexChar = "0123456789ABCDEF";
 using namespace std;
@@ -60,6 +61,7 @@ ChannelConfig channels[MAX_CHANNELS];
 extern std::vector<PeriodicMsg> periodicmessages1;
 extern std::vector<PeriodicMsg> periodicmessages2;
 elm327Comm elm327;
+extern std::mutex g_periodic_vectors_mutex;
 
 string thisDllDirPath()
 {
@@ -375,7 +377,7 @@ EXTERN_DLL_EXPORT long J2534_API PassThruWriteMsgs(unsigned long ChannelID, PASS
 		}
 		else
 		{
-			elm327.SendPassthruMessage(&pMsg[m], 1);
+			elm327.SendIsoTpMessage(&pMsg[m], 1);
 		}
 	}
 	return retval;
@@ -391,26 +393,43 @@ EXTERN_DLL_EXPORT long J2534_API PassThruStartPeriodicMsg(unsigned long ChannelI
 	{
 		return ERR_DEVICE_NOT_CONNECTED;
 	}
+
+	if (pMsg == NULL)
+	{
+		return ERR_NULL_PARAMETER;
+	}
+
+	PeriodicMsg pmsg;
+	pmsg.Msg.MsgId = elm327.ArrayToInt(pMsg->Data, 0);
+
+	pmsg.Msg.size = pMsg->DataSize - 4;
+
+	if (pmsg.Msg.size >= 0 && pmsg.Msg.size <= 8)
+	{
+		memcpy(pmsg.Msg.data, &pMsg->Data[4], pmsg.Msg.size);
+	}
+	else
+	{
+		return ERR_INVALID_MSG;
+	}
+	pmsg.interval = TimeInterval;
+	pmsg.LastMessageTime = 0;
+
 	if (ChannelID == 1)
 	{
-		PeriodicMsg pmsg;
-		pmsg.interval = TimeInterval;
-		pmsg.LastMessageTime = 0;
 		pmsg.Id = periodicmessages1.size() + 1;
 		periodicmessages1.push_back(pmsg);
-		elm327.StartPeriodicMessages();
 		*pMsgID = pmsg.Id;
 	}
 	else
 	{
-		PeriodicMsg pmsg;
-		pmsg.interval = TimeInterval;
-		pmsg.LastMessageTime = 0;
 		pmsg.Id = periodicmessages2.size() + 1;
 		periodicmessages2.push_back(pmsg);
 		*pMsgID = pmsg.Id;
-
 	}
+
+	elm327.StartPeriodicMessages();
+
 	shim_clearInternalError();
 	dtDebug(_T("%.3fs ++ PTStartPeriodicMsg(%ld, 0x%08X, 0x%08X, %ld)\n"), GetTimeSinceInit(), ChannelID, pMsg, pMsgID, TimeInterval);
 //	SHIM_CHECK_DLL();

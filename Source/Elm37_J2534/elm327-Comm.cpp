@@ -8,6 +8,7 @@
 #include <regex>
 #include <algorithm>
 #include <sstream>
+#include <mutex>
 
 #define PAD 0xAA
 //#define PAD 0x00
@@ -22,12 +23,13 @@ std::vector<PeriodicMsg> periodicmessages2;
 SafeQueue<canmsg> OutgoingMessages;
 SafeQueue<elm327Response>Responses;
 SafeQueue<PASSTHRU_MSG> ReceivedIsoTpMessages;
+SafeQueue<PASSTHRU_MSG> TransmiteIsoTpMessages;
 bool Connected = false;
 int readTimeout = 2000;
 int writeTimeout = 1000;
 int CurrentProtocol;
 std::string currentHeader = "unset";
-HANDLE bgTask;
+HANDLE bgTask = NULL;
 
 elm327Comm::elm327Comm(void)
 {
@@ -131,7 +133,8 @@ void elm327Comm::StartPeriodicMessages()
 
     GetExitCodeThread(bgTask, &dwExitCode);
     if (dwExitCode != STILL_ACTIVE) {
-        bgTask = CreateThread(0, 0, &static_SendPeriodcMessages, 0, 0, 0);
+        bgTask = CreateThread(0, 0, &static_SendPeriodicMessages, this, 0, 0);
+        OutputDebugStringA((std::string("Starting periodic message processing thread...")).c_str());
     }
 
 }
@@ -144,24 +147,33 @@ void elm327Comm::EnqueuePassthruMsg(PASSTHRU_MSG pMsg)
 PASSTHRU_MSG elm327Comm::ReceiveIsoTpMessage(int timeout)
 {
     PASSTHRU_MSG pMsg;
+    PASSTHRU_MSG txpMsg;
     pMsg.DataSize = 0;
+    SetReadTimeout(timeout);
+    SetWriteTimeout(2000);
+
+    if (TransmiteIsoTpMessages.Size() > 0)
+    {
+        ReceivedIsoTpMessages.Clear();
+    }
+
+    while (TransmiteIsoTpMessages.Size() > 0)
+    {
+        TransmiteIsoTpMessages.Consume(txpMsg);
+        SendPassthruMessage(&txpMsg, 1);
+        ResetPeriodicMessageTimers();
+    }
+
     uint64_t starttime = current_time_ms();
     OutputDebugStringA((std::string("ReceiveIsoTpMessage")).c_str());
-    for (;;)
+    
+    if (ReceivedIsoTpMessages.Size() > 0)
     {
-        Receive(1, timeout);
-        if (ReceivedIsoTpMessages.Size() > 0)
-        {
-            //OutputDebugStringA((std::string("Receive message, cmd: ") + n2hexstr(messagecommand) + "\n").c_str());
-            ReceivedIsoTpMessages.Consume(pMsg);
-            break;
-        }
-        Sleep(1);
-        if ((current_time_ms() - starttime) > timeout)
-        {
-            break;
-        }
+        //OutputDebugStringA((std::string("Receive message, cmd: ") + n2hexstr(messagecommand) + "\n").c_str());
+        ReceivedIsoTpMessages.Consume(pMsg);
+
     }
+
     return pMsg;
 }
 
@@ -169,6 +181,7 @@ int elm327Comm::ClearBuffer()
 {
     int retval = ReceivedIsoTpMessages.Size();
     ReceivedIsoTpMessages.Clear();
+    TransmiteIsoTpMessages.Clear();
     return retval;
 }
 
@@ -249,9 +262,9 @@ uint32_t elm327Comm::elm327SetFilter(UINT32 Filter, UINT32 Flow, UINT32 Mask, ui
     isExtendedAdressing = isExtAddress;
 
     if (isExtAddress)
-        SendRequest("AT FCSD" + ToHex(&extendedAddress,1,false) + "30000A", true);
+        SendRequest("AT FCSD" + ToHex(&extendedAddress,1,false) + "300000", true);
     else
-        SendRequest("AT FCSD30000A", true);
+        SendRequest("AT FCSD300000", true);
 
     return 1;
 }
@@ -261,13 +274,41 @@ int elm327Comm::elm327RemoveFilters(uint8_t bus)
     return 0;
 }
 
+bool elm327Comm::elm327SendPeriodicMsg(canmsg Msg, int timeout)
+{
+    SetWriteTimeout(1000);
+    PASSTHRU_MSG message;
+    UintToArray(Msg.MsgId, message.Data);
+    memcpy(message.Data + 4, Msg.data, Msg.size);
+    message.DataSize = 4 + Msg.size;
+    return SendPassthruMessage(&message, 1);
+}
+
 bool elm327Comm::elm327SendMsg(canmsg Msg, int timeout)
 {
     SetWriteTimeout(timeout);
     PASSTHRU_MSG message;
     UintToArray(Msg.MsgId, message.Data);
     memcpy(message.Data + 4, Msg.data, Msg.size);
-    return SendPassthruMessage(&message, 1);
+    message.DataSize = 4 + Msg.size;
+    return SendIsoTpMessage(&message, 1);
+}
+
+void elm327Comm::ResetPeriodicMessageTimers()
+{
+    if (periodicmessages1.size() == 0 && periodicmessages2.size() == 0)
+    {
+        return;
+    }
+    for (auto& pmsg : periodicmessages1)
+    {
+        pmsg.LastMessageTime = current_time_ms();
+    }
+    for (auto& pmsg : periodicmessages2)
+    {
+        pmsg.LastMessageTime = current_time_ms();
+    }
+    
 }
 
 void elm327Comm::SendPeriodicMessages()
@@ -278,25 +319,23 @@ void elm327Comm::SendPeriodicMessages()
         {
             break;
         }
-        for (int i = 0; i < periodicmessages1.size();i++)
+        for (auto& pmsg : periodicmessages1)
         {
-            PeriodicMsg pmsg = periodicmessages1.at(i);
             if ((current_time_ms() - pmsg.LastMessageTime) > pmsg.interval)
             {
-                elm327SendMsg(pmsg.Msg, 0);
+                elm327SendPeriodicMsg(pmsg.Msg, 200);
                 pmsg.LastMessageTime = current_time_ms();
             }
         }
-        for (int i = 0; i < periodicmessages2.size();i++)
+        for (auto& pmsg : periodicmessages2)
         {
-            PeriodicMsg pmsg = periodicmessages2.at(i);
             if ((current_time_ms() - pmsg.LastMessageTime) > pmsg.interval)
             {
-                elm327SendMsg(pmsg.Msg, 0);
+                elm327SendPeriodicMsg(pmsg.Msg, 200);
                 pmsg.LastMessageTime = current_time_ms();
             }
         }
-        Sleep(10);
+        Sleep(50);
     }
 }
 
@@ -334,10 +373,12 @@ inline void trim(std::string& s) {
 /// </summary>
 bool elm327Comm::SetReadTimeout(int milliseconds)
 {
+    milliseconds = milliseconds + 50;
     if (readTimeout == milliseconds)
     {
         return true;
     }
+    readTimeout = milliseconds;
     int parameter = (std::min)((std::max)(1, (milliseconds / 4)), 255);
     std::string value = n2hexstr(parameter,2);
     return SendAndVerify("AT ST " + value, "OK");
@@ -485,13 +526,12 @@ int elm327Comm::ConnectProtocol(int Protocol, int Bauds)
             !SendAndVerify("AT SP6", "OK") ||              // Set Protocol 6 (CAN)
             !SendAndVerify("AT AR", "OK") ||               // Turn Auto Receive on (default should be on anyway)
             !SendAndVerify("AT AT0", "OK") || 
-            !SendAndVerify("AT SP6", "OK") ||
             !SendAndVerify("AT SH" + currentHeader, "OK") || // Set header
             !SendAndVerify("AT CF000" , "OK") ||     //Set filter id
             !SendAndVerify("AT CM000", "OK") ||     //Set filter 
             !SendAndVerify("AT CAF0", "OK") ||               // Don't format isotp messages automatically
             !SendAndVerify("AT FCSH" + currentHeader, "OK") ||         //Automatically send flow control messages
-            !SendAndVerify("AT FCSD30000A", "OK") ||         //Automatically send flow control messages
+            !SendAndVerify("AT FCSD300000", "OK") ||         //Automatically send flow control messages
             !SendAndVerify("AT FCSM1", "OK") ||         //Automatically send flow control messages
             !SendAndVerify("AT CFC1", "OK") ||          //Automatically send flow control messages
             !SendAndVerify("AT ST 64", "OK"))             // Set timeout (will be adjusted later, too)                 
@@ -889,6 +929,15 @@ void elm327Comm::ParseMessage(byte *messageBytes, int messagelen, std::string *h
         *header = hexRequest.substr(7, 4);
         *payload = hexRequest.substr(12);
     }
+}
+
+/// <summary>
+/// Storage a message.
+/// </summary>
+bool elm327Comm::SendIsoTpMessage(PASSTHRU_MSG* message, int responses)
+{
+    TransmiteIsoTpMessages.Produce(std::move(*message));
+    return true;
 }
 
 /// <summary>
