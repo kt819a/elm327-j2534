@@ -17,6 +17,7 @@
 extern std::string PathOfDll;
 extern std::string ComPort;
 extern int Baudrate;
+extern bool isPadding; 
 std::string thisDllDirPath();
 
 #pragma comment(lib, "setupapi.lib")
@@ -51,6 +52,7 @@ void CSelectionBox::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_EDIT1, m_logfolder);
 	DDX_Control(pDX, IDC_COMBO_DEVICE, m_jDevice);
 	DDX_Control(pDX, IDC_COMBO_BAUDRATE, m_baudrate);
+	DDX_Control(pDX, IDC_PADDING_CHECK, m_checkPadding);
 }
 
 
@@ -116,13 +118,19 @@ BOOL CSelectionBox::OnInitDialog()
 				if (token == NULL) continue;
 				CString tmp(token);
 				m_logfolder.SetWindowText(tmp);
-
+			}
+			if (0 == _stricmp(token, "IS_PADDING"))
+			{
+				token = strtok_s(NULL, SEPARATORS, &context);
+				if (token == NULL) continue;
+				isPadding = (atoi(token) != 0);
 			}
 		}
 		fclose(inf);
 
 	}
 
+	m_checkPadding.SetCheck(isPadding ? BST_CHECKED : BST_UNCHECKED);
 	int sel = 0;
 
 	SerialPorts = ListSerialPorts();
@@ -201,6 +209,8 @@ void CSelectionBox::OnBnClickedOk()
 	sel = m_baudrate.GetCurSel();
 	Baudrate = _ttoi(bauds[sel]);
 
+	isPadding = (m_checkPadding.GetCheck() == BST_CHECKED);
+
 	GetLocalTime(&LocalTime);
 	cstrDebugFile.Format(_T("%s\\%s_%04d-%02d-%02d_%02d-%02d-%02d_%04d.txt"), cstrLogFolder, _T("UPX-CAN"), LocalTime.wYear,
 		LocalTime.wMonth, LocalTime.wDay, LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond,
@@ -219,6 +229,7 @@ void CSelectionBox::OnBnClickedOk()
 	fprintf(outf, "COMPORT=%s\n", ComPort.c_str());
 	fprintf(outf, "LOGFOLDER=%S\n", (LPCTSTR)cstrLogFolder);
 	fprintf(outf, "BAUDRATE=%d\n", Baudrate);
+	fprintf(outf, "IS_PADDING=%d\n", isPadding ? 1 : 0);
 	fclose(outf);
 
 	//HANDLE bgHandle = CreateThread(0, 0, &FileMonitor, 0, 0, 0);

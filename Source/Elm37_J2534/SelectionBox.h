@@ -68,6 +68,7 @@ private:
 	CButton m_button_ok;
 	CComboBox m_jDevice;
 	CComboBox m_baudrate;
+	CButton m_checkPadding;
 //	CButton m_button_config;
 
 //	void DoPopulateRegistryListbox();

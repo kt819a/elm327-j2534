@@ -99,6 +99,7 @@ private:
 
 	bool isExtendedAdressing;
 	UINT8 extendedAddress;
+	UINT32 currentFilterAddress;
 
 	static DWORD WINAPI static_SendPeriodicMessages(void* args)
 	{

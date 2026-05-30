@@ -15,6 +15,7 @@
 
 std::string ComPort;
 int Baudrate;
+bool isPadding = false;
 
 CommChannel Serial;
 extern ChannelConfig channels[MAX_CHANNELS];
@@ -34,6 +35,7 @@ HANDLE bgTask = NULL;
 elm327Comm::elm327Comm(void)
 {
     currentHeader = "752";
+    currentFilterAddress = 0;
 }
 elm327Comm::~elm327Comm(void)
 {
@@ -254,6 +256,16 @@ uint32_t elm327Comm::elm327SetFilter(UINT32 Filter, UINT32 Flow, UINT32 Mask, ui
         << ", bus: " << static_cast<int>(bus) << ", isExtAddress: " << (isExtAddress ? "true" : "false")
         << ", extAddress: 0x" << std::hex << static_cast<int>(extAddress) << std::dec << ")";
     OutputDebugStringA(oss.str().c_str());
+
+    if (currentFilterAddress != Filter)
+    {
+        currentFilterAddress = Filter;
+        UINT8 hiAddr = (currentFilterAddress >> 8) & 0xFF, loAddr = currentFilterAddress & 0xFF;
+        SendRequest("AT CF" +
+            ToHex((byte*)&hiAddr, 1, false).substr(1) +
+            ToHex((byte*)&loAddr, 1, false),
+            true);
+    }
 
     if ((extendedAddress == extAddress) && (isExtendedAdressing == isExtAddress))
         return 1;
@@ -521,6 +533,11 @@ int elm327Comm::ConnectProtocol(int Protocol, int Bauds)
 
     if (Protocol == ISO15765)
     {
+        if (isPadding)
+            SendAndVerify("AT V0", "OK");
+        else
+            SendAndVerify("AT V1", "OK");
+
         if (!SendAndVerify("AT AL", "OK") ||
             !SendAndVerify("AT H1", "OK") ||
             !SendAndVerify("AT SP6", "OK") ||              // Set Protocol 6 (CAN)
@@ -528,7 +545,7 @@ int elm327Comm::ConnectProtocol(int Protocol, int Bauds)
             !SendAndVerify("AT AT0", "OK") || 
             !SendAndVerify("AT SH" + currentHeader, "OK") || // Set header
             !SendAndVerify("AT CF000" , "OK") ||     //Set filter id
-            !SendAndVerify("AT CM000", "OK") ||     //Set filter 
+            !SendAndVerify("AT CMFFF", "OK") ||     //Set filter
             !SendAndVerify("AT CAF0", "OK") ||               // Don't format isotp messages automatically
             !SendAndVerify("AT FCSH" + currentHeader, "OK") ||         //Automatically send flow control messages
             !SendAndVerify("AT FCSD300000", "OK") ||         //Automatically send flow control messages
@@ -825,22 +842,32 @@ std::vector<std::string> elm327Comm::BuildIsoTpFrames(byte *fullMessage, int ful
     {
         // Single Frame
         byte frame[8];
+        std::string frameStr;
         if (isExtendedAdressing)
         {
             frame[0] = extendedAddress;
             frame[1] = (byte)(0x00 | size); // SF | length
             memcpy(frame + 2, message, size);
-            for (int i = 2 + size; i < 8; i++)
-                frame[i] = PAD; // AA padding
+            if (isPadding)
+            {
+                for (int i = 2 + size; i < 8; i++)
+                    frame[i] = PAD; // AA padding
+                frameStr = ToHex(frame, 8);
+            } else
+                frameStr = ToHex(frame, size + 2);
         }
         else
         {
             frame[0] = (byte)(0x00 | size); // SF | length
             memcpy(frame + 1, message, size);
-            for (int i = 1 + size; i < 8; i++)
-                frame[i] = PAD; // AA padding
-        }
-        std::string frameStr = ToHex(frame,8);
+            if (isPadding)
+            {
+                for (int i = 1 + size; i < 8; i++)
+                    frame[i] = PAD; // AA padding
+                frameStr = ToHex(frame, 8);
+            } else 
+                frameStr = ToHex(frame, size + 1);
+        }            
         frames.push_back(frameStr); 
     }
     else
@@ -877,23 +904,34 @@ std::vector<std::string> elm327Comm::BuildIsoTpFrames(byte *fullMessage, int ful
             if ((totalLength - offset) < maxPayloadSize)
                 chunkSize = totalLength - offset;
             byte cf[8];
+            std::string cfStr;
             if (isExtendedAdressing)
             {
                 cf[0] = extendedAddress;
                 cf[1] = (byte)(0x20 | (frameNumber & 0x0F)); // CF | sequence number
                 memcpy(cf + 2, message + offset, chunkSize);
-                for (int j = 2 + chunkSize; j < 8; j++)
-                    cf[j] = PAD; // AA padding
+                if (isPadding)
+                {
+                    for (int j = 2 + chunkSize; j < 8; j++)
+                        cf[j] = PAD; // AA padding
+                    cfStr = ToHex(cf, 8);
+                }
+                else
+                    cfStr = ToHex(cf, chunkSize + 2);
             }
             else
             {
                 cf[0] = (byte)(0x20 | (frameNumber & 0x0F)); // CF | sequence number
                 memcpy(cf + 1, message + offset, chunkSize);
-                for (int j = 1 + chunkSize; j < 8; j++)
-                    cf[j] = PAD; // AA padding
+                if (isPadding)
+                {
+                    for (int j = 1 + chunkSize; j < 8; j++)
+                        cf[j] = PAD; // AA padding
+                    cfStr = ToHex(cf, 8);
+                }
+                else
+                    cfStr = ToHex(cf, chunkSize + 1);
             }
-
-            std::string cfStr = ToHex(cf, 8);
             frames.push_back(cfStr);
             offset += chunkSize;
         }

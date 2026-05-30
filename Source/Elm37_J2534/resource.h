@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ generated include file.
-// Used by ptshim.rc
+// ���������� ����, ��������� � Microsoft Visual C++.
+// ������������ ptshim.rc
 //
 #define IDD_DIALOG1                     1000
 #define IDC_LIST1                       1000
@@ -18,7 +18,7 @@
 #define IDC_RICHEDIT21                  1013
 #define IDC_MFCMENUBUTTON1              1014
 #define IDC_EDIT_MSGLOG                 1016
-#define IDC_CHECK1                      1017
+#define IDC_PADDING_CHECK               1017
 #define IDC_COMBO_DEVICE                1018
 #define IDC_COMBO1                      1021
 
