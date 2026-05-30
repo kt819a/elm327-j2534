@@ -12,12 +12,14 @@
 #include <vector>
 #include <stdio.h>
 #include "j2534-elm327.h"
+#include "elm327-comm.h"
 #include "SelectionBox.h"
 //using namespace std;
 extern std::string PathOfDll;
 extern std::string ComPort;
 extern int Baudrate;
 extern bool isPadding; 
+extern elm327Comm elm327;
 std::string thisDllDirPath();
 
 #pragma comment(lib, "setupapi.lib")
@@ -212,7 +214,7 @@ void CSelectionBox::OnBnClickedOk()
 	isPadding = (m_checkPadding.GetCheck() == BST_CHECKED);
 
 	GetLocalTime(&LocalTime);
-	cstrDebugFile.Format(_T("%s\\%s_%04d-%02d-%02d_%02d-%02d-%02d_%04d.txt"), cstrLogFolder, _T("UPX-CAN"), LocalTime.wYear,
+	cstrDebugFile.Format(_T("%s\\%s_%04d-%02d-%02d_%02d-%02d-%02d_%04d.txt"), cstrLogFolder, _T("J2534"), LocalTime.wYear,
 		LocalTime.wMonth, LocalTime.wDay, LocalTime.wHour, LocalTime.wMinute, LocalTime.wSecond,
 		LocalTime.wMilliseconds);
 
@@ -236,7 +238,10 @@ void CSelectionBox::OnBnClickedOk()
 
 	//SetupDiDestroyClassImageList(&ild);
 
-	OnOK();
+	if (elm327.Checkelm327Comm() == 0)
+		OnOK();
+	else
+		MessageBoxA(NULL, "Connection error!", "ELM327-J2534", MB_ICONERROR);
 }
 
 

@@ -62,6 +62,7 @@ public:
 	elm327Comm(void);
 	~elm327Comm(void);
 	int Startelm327Comm();
+	int Checkelm327Comm();
 	void Stopelm327Comm();
 	bool elm327SendMsg(canmsg Msg, int timeout);
 	uint32_t elm327SetFilter(UINT32 Filter, UINT32 Flow, UINT32 Mask, uint8_t bus, bool isExtAddress, UINT8 extAddress);

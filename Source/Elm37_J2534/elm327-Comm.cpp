@@ -581,11 +581,11 @@ int elm327Comm::Startelm327Comm()
     {
         return ERR_DEVICE_IN_USE;
     }
-    SendRequest("ATZ", true);
-    //if (SendRequest("ATZ", true).Data == "")
-    //{
-    //    return ERR_FAILED;
-    //}
+    
+    if (!SendAndVerify("ATE0", "OK"))
+    {
+        return ERR_FAILED;
+    }
 
     //OutputDebugStringA(SendRequest("AT E0", true).Data.c_str()); // disable echo
     //OutputDebugStringA(SendRequest("AT S0", true).Data.c_str()); // no spaces on responses
@@ -598,6 +598,22 @@ int elm327Comm::Startelm327Comm()
     CurrentProtocol = 0;
 
     //_beginthread(elm327Comm::static_ReceiveMessages, 0, NULL);
+    return 0;
+}
+
+int elm327Comm::Checkelm327Comm()
+{
+    Serial.Close();
+    if (!Serial.Open(ComPort, Baudrate, 8, 0, 1))
+    {
+        return ERR_DEVICE_IN_USE;
+    }
+
+    if (!SendAndVerify("ATE0", "OK"))
+    {
+        return ERR_FAILED;
+    }
+    Serial.Close();
     return 0;
 }
 
